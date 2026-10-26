@@ -176,7 +176,10 @@ public class BaseFinderClient implements ClientModInitializer {
 		dim.reports.add(new Report(bestX, bestZ, total, bestSummary));
 		announce(mc, pending.dimension(), bestX, bestZ, total, bestSummary);
 	}
-	/** Called when the key is pressed: lists the bases found in the current dimension, nearest first. */
+		/** Bases farther away than this many blocks are not listed. */
+	private static final int MAX_DISTANCE = 3000;
+
+	/** Called when the key is pressed: lists the bases found near you in this dimension, nearest first. */
 	private void showReports(Minecraft mc) {
 		if (mc.player == null || mc.level == null) {
 			return;
@@ -191,13 +194,26 @@ public class BaseFinderClient implements ClientModInitializer {
 
 		double px = mc.player.getX();
 		double pz = mc.player.getZ();
-		List<Report> sorted = new ArrayList<>(dim.reports);
-		sorted.sort(Comparator.comparingDouble((Report r) -> distance(r, px, pz)));
+		List<Report> nearby = new ArrayList<>();
+		for (Report report : dim.reports) {
+			if (distance(report, px, pz) <= MAX_DISTANCE) {
+				nearby.add(report);
+			}
+		}
+		int hidden = dim.reports.size() - nearby.size();
 
-		mc.player.sendSystemMessage(Component.literal(TAG + sorted.size() + " possible base(s) in the "
-				+ dimensionName + ", nearest first:"));
-		for (int i = 0; i < Math.min(MAX_SHOWN, sorted.size()); i++) {
-			Report r = sorted.get(i);
+		if (nearby.isEmpty()) {
+			mc.player.sendSystemMessage(Component.literal(TAG + "No bases within " + MAX_DISTANCE
+					+ " blocks of you. Fly around so more chunks load. (" + hidden + " far away find(s) hidden)"));
+			return;
+		}
+
+		nearby.sort(Comparator.comparingDouble((Report r) -> distance(r, px, pz)));
+
+		mc.player.sendSystemMessage(Component.literal(TAG + nearby.size() + " possible base(s) within "
+				+ MAX_DISTANCE + " blocks, nearest first:"));
+		for (int i = 0; i < Math.min(MAX_SHOWN, nearby.size()); i++) {
+			Report r = nearby.get(i);
 			int x = r.chunkX * 16 + 8;
 			int z = r.chunkZ * 16 + 8;
 			mc.player.sendSystemMessage(Component.literal("  #" + (i + 1) + "  X " + x + " Z " + z + "  ("
