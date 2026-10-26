@@ -113,8 +113,7 @@ public class BaseFinderClient implements ClientModInitializer {
 			process(mc, queue.poll());
 		}
 	}
-
-	private void process(Minecraft mc, PendingChunk pending) {
+		private void process(Minecraft mc, PendingChunk pending) {
 		LevelChunk chunk = pending.chunk();
 		int cx = chunk.getPos().getMinBlockX() >> 4;
 		int cz = chunk.getPos().getMinBlockZ() >> 4;
@@ -177,7 +176,6 @@ public class BaseFinderClient implements ClientModInitializer {
 		dim.reports.add(new Report(bestX, bestZ, total, bestSummary));
 		announce(mc, pending.dimension(), bestX, bestZ, total, bestSummary);
 	}
-
 	/** Called when the key is pressed: lists the bases found in the current dimension, nearest first. */
 	private void showReports(Minecraft mc) {
 		if (mc.player == null || mc.level == null) {
