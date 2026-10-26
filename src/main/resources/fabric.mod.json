@@ -1,0 +1,21 @@
+{
+	"schemaVersion": 1,
+	"id": "basefinder",
+	"version": "${version}",
+	"name": "Base Finder",
+	"description": "Client-side scanner that flags chunks full of player-made blocks (chests, shulker boxes, furnaces, beds, concrete...) as possible bases.",
+	"authors": [],
+	"license": "CC0-1.0",
+	"environment": "client",
+	"entrypoints": {
+		"client": [
+			"com.basefinder.BaseFinderClient"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.3",
+		"minecraft": "~26.2",
+		"java": ">=25",
+		"fabric-api": "*"
+	}
+}
