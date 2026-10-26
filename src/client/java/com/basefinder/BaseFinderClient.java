@@ -99,4 +99,151 @@ public class BaseFinderClient implements ClientModInitializer {
 			dimensions.clear();
 		});
 
-		LOGGER.info("Base
+		LOGGER.info("Base Finder loaded (threshold {}, requireStrong {})", config.threshold, config.requireStrong);
+	}
+
+	private void tick(Minecraft mc) {
+		while (showKey.consumeClick()) {
+			showReports(mc);
+		}
+
+		// Scan a couple of chunks per tick so flying around never causes a lag spike.
+		int budget = config.chunksPerTick;
+		while (budget-- > 0 && !queue.isEmpty()) {
+			process(mc, queue.poll());
+		}
+	}
+
+	private void process(Minecraft mc, PendingChunk pending) {
+		LevelChunk chunk = pending.chunk();
+		int cx = chunk.getPos().getMinBlockX() >> 4;
+		int cz = chunk.getPos().getMinBlockZ() >> 4;
+		DimensionState dim = dimensions.computeIfAbsent(pending.dimension(), k -> new DimensionState());
+
+		if (dim.scores.containsKey(key(cx, cz))) {
+			return; // already scanned this chunk
+		}
+
+		ChunkScore score = ChunkScanner.scan(chunk);
+		if (score.points() <= 0) {
+			return;
+		}
+		dim.scores.put(key(cx, cz), score);
+
+		// Add up this chunk and its already-scanned neighbours, so a base that straddles
+		// several chunks still adds up to a high score.
+		int total = 0;
+		int strong = 0;
+		int bestPoints = -1;
+		int bestX = cx;
+		int bestZ = cz;
+		String bestSummary = score.summary();
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				ChunkScore s = dim.scores.get(key(cx + dx, cz + dz));
+				if (s == null) {
+					continue;
+				}
+				total += s.points();
+				strong += s.strong();
+				if (s.points() > bestPoints) {
+					bestPoints = s.points();
+					bestX = cx + dx;
+					bestZ = cz + dz;
+					bestSummary = s.summary();
+				}
+			}
+		}
+
+		if (total < config.threshold) {
+			return;
+		}
+		if (config.requireStrong && strong == 0 && total < config.threshold * 4) {
+			return;
+		}
+
+		for (Report report : dim.reports) {
+			if (Math.abs(report.chunkX - bestX) <= MERGE_RADIUS && Math.abs(report.chunkZ - bestZ) <= MERGE_RADIUS) {
+				// Same base as an earlier report. Only speak up again if it turned out much bigger.
+				if (total >= report.score * 2) {
+					report.score = total;
+					report.summary = bestSummary;
+					announce(mc, pending.dimension(), bestX, bestZ, total, bestSummary);
+				}
+				return;
+			}
+		}
+
+		dim.reports.add(new Report(bestX, bestZ, total, bestSummary));
+		announce(mc, pending.dimension(), bestX, bestZ, total, bestSummary);
+	}
+
+	/** Called when the key is pressed: lists the bases found in the current dimension, nearest first. */
+	private void showReports(Minecraft mc) {
+		if (mc.player == null || mc.level == null) {
+			return;
+		}
+		String dimensionName = dimensionName(mc.level.dimension().toString());
+		DimensionState dim = dimensions.get(dimensionName);
+		if (dim == null || dim.reports.isEmpty()) {
+			mc.player.sendSystemMessage(Component.literal(TAG + "No bases found yet in the " + dimensionName
+					+ ". Fly around so more chunks load."));
+			return;
+		}
+
+		double px = mc.player.getX();
+		double pz = mc.player.getZ();
+		List<Report> sorted = new ArrayList<>(dim.reports);
+		sorted.sort(Comparator.comparingDouble((Report r) -> distance(r, px, pz)));
+
+		mc.player.sendSystemMessage(Component.literal(TAG + sorted.size() + " possible base(s) in the "
+				+ dimensionName + ", nearest first:"));
+		for (int i = 0; i < Math.min(MAX_SHOWN, sorted.size()); i++) {
+			Report r = sorted.get(i);
+			int x = r.chunkX * 16 + 8;
+			int z = r.chunkZ * 16 + 8;
+			mc.player.sendSystemMessage(Component.literal("  #" + (i + 1) + "  X " + x + " Z " + z + "  ("
+					+ (int) distance(r, px, pz) + " blocks away)  score " + r.score + "  " + r.summary));
+		}
+	}
+
+	private static double distance(Report r, double px, double pz) {
+		double dx = r.chunkX * 16 + 8 - px;
+		double dz = r.chunkZ * 16 + 8 - pz;
+		return Math.sqrt(dx * dx + dz * dz);
+	}
+
+	private void announce(Minecraft mc, String dimension, int chunkX, int chunkZ, int score, String summary) {
+		int x = chunkX * 16 + 8;
+		int z = chunkZ * 16 + 8;
+		String line = dimension + " | X " + x + " Z " + z + " | score " + score + " | " + summary;
+
+		LOGGER.info("Possible base: {}", line);
+		appendToLog(line);
+		if (config.chat && mc.player != null) {
+			mc.player.sendSystemMessage(Component.literal(TAG + "Possible base: " + line));
+		}
+	}
+
+	private static void appendToLog(String line) {
+		Path file = FabricLoader.getInstance().getGameDir().resolve("basefinder-log.txt");
+		String text = LocalDateTime.now().withNano(0) + " | " + line + System.lineSeparator();
+		try {
+			Files.writeString(file, text, StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+		} catch (IOException e) {
+			LOGGER.warn("Could not write basefinder-log.txt", e);
+		}
+	}
+
+	private static long key(int chunkX, int chunkZ) {
+		return ((long) chunkX << 32) ^ (chunkZ & 0xFFFFFFFFL);
+	}
+
+	/** "ResourceKey[minecraft:dimension / minecraft:overworld]" -> "overworld" */
+	private static String dimensionName(String raw) {
+		int slash = raw.lastIndexOf('/');
+		String name = slash >= 0 ? raw.substring(slash + 1) : raw;
+		name = name.replace("]", "").trim();
+		return name.startsWith("minecraft:") ? name.substring("minecraft:".length()) : name;
+	}
+}
