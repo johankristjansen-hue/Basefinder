@@ -9,7 +9,8 @@
 	"environment": "client",
 	"entrypoints": {
 		"client": [
-			"com.basefinder.BaseFinderClient"
+			"com.basefinder.BaseFinderClient",
+			"com.basefinder.BaseHighlighter"
 		]
 	},
 	"depends": {
