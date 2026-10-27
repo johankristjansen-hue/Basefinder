@@ -10,9 +10,13 @@ import net.minecraft.world.level.block.Block;
  * How "base-like" each block is. Blocks are matched by their registry id (e.g. "chest",
  * "red_concrete") so this keeps working even if Mojang renames Java classes between versions.
  *
- * Weight 0  = ignored
- * Weight 1-3 = common building / utility blocks (also show up in villages, mineshafts, ...)
- * Weight 8+ = "strong" blocks that natural world generation almost never creates in bulk
+ * Only blocks that players put down in numbers count. Generic building blocks (planks, torches,
+ * rails, doors, glass, cobblestone, ...) are ignored on purpose, because mineshafts, villages and
+ * other natural structures are full of them.
+ *
+ * Weight 0   = ignored
+ * Weight 1-4 = storage and utility blocks
+ * Weight 8+  = "strong" blocks that natural world generation almost never creates in bulk
  */
 final class BlockWeights {
 	/** Weight at or above this counts as a "strong" signal. */
@@ -62,7 +66,7 @@ final class BlockWeights {
 			return 10;
 		}
 
-		// --- medium signals ---------------------------------------------------------------
+		// --- redstone / brewing gear ------------------------------------------------------
 		if (id.equals("dispenser") || id.equals("piston") || id.equals("sticky_piston")) {
 			return 5;
 		}
@@ -70,30 +74,17 @@ final class BlockWeights {
 			return 4;
 		}
 
-		// --- common utility blocks --------------------------------------------------------
-		if (id.equals("chest")
-				|| id.equals("trapped_chest")
-				|| id.equals("barrel")
-				|| id.equals("furnace")
-				|| id.equals("blast_furnace")
-				|| id.equals("smoker")
-				|| id.equals("crafting_table")
-				|| id.endsWith("_bed")) {
+		// --- storage and utility blocks ---------------------------------------------------
+		if (id.equals("chest") || id.equals("trapped_chest")) {
+			return 4;
+		}
+		if (id.equals("barrel")) {
 			return 3;
 		}
-		if (id.endsWith("_sign") || id.contains("lantern")) {
+		if (id.equals("furnace") || id.equals("blast_furnace") || id.equals("smoker")) {
 			return 2;
 		}
-
-		// --- cheap building blocks (low weight, helps early-game bases) -------------------
-		if (id.endsWith("_planks")
-				|| id.endsWith("_door")
-				|| id.equals("glass")
-				|| id.equals("glass_pane")
-				|| id.equals("cobblestone")
-				|| id.equals("stone_bricks")
-				|| id.equals("bricks")
-				|| id.contains("torch")) {
+		if (id.equals("crafting_table") || id.endsWith("_bed")) {
 			return 1;
 		}
 
