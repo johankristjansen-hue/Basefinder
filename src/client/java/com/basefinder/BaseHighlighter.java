@@ -1,8 +1,9 @@
 package com.basefinder;
 
 import java.util.ArrayList;
-import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalDouble;
 
@@ -36,26 +37,23 @@ import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderContext;
 import net.fabricmc.fabric.api.client.rendering.v1.level.LevelRenderEvents;
 
 /**
- * Draws a glowing orange beam (visible through walls) over every base the finder reports.
+ * Draws an orange box (visible through walls) around every block that counted towards a reported base.
  * Based on the "Rendering in the World" example from the official Fabric docs.
  */
 public class BaseHighlighter implements ClientModInitializer {
-	/** Only the nearest few beams are drawn. */
-	private static final int MAX_BEAMS = 3;
-	private static final float MIN_Y = -64f;
-	private static final float MAX_Y = 320f;
-	private static final float HALF_WIDTH = 0.6f;
-	/** A new find closer than this many blocks to an old one replaces it. */
-	private static final int MERGE_DISTANCE = 64;
-
-	private record Target(String dimension, int x, int z) {
-	}
+	/** At most this many boxes are drawn at once. */
+	private static final int MAX_BOXES = 300;
+	/** Only blocks this close (in blocks, sideways) to you are drawn. */
+	private static final double SHOW_DISTANCE = 160.0;
+	/** Makes each box a tiny bit bigger than the block so it is easy to see. */
+	private static final float GROW = 0.02f;
 
 	/** Immutable data copied during the "extraction" phase and used in the "drawing" phase. */
-	private record BeamState(float x, float z) {
+	private record BoxState(int x, int y, int z) {
 	}
 
-	private static final List<Target> TARGETS = new ArrayList<>();
+	/** dimension -> chunk key -> x, y, z triples of the blocks to highlight. */
+	private static final Map<String, Map<Long, int[]>> BLOCKS = new HashMap<>();
 
 	private static final RenderPipeline FILLED_THROUGH_WALLS = RenderPipelines.register(
 			RenderPipeline.builder(RenderPipelines.DEBUG_FILLED_SNIPPET)
@@ -69,14 +67,14 @@ public class BaseHighlighter implements ClientModInitializer {
 	private static final StagedVertexBuffer stagedBuffer =
 			new StagedVertexBuffer(() -> "Base Finder Highlights", RenderType.SMALL_BUFFER_SIZE);
 
-	private List<BeamState> beams = List.of();
+	private List<BoxState> boxes = List.of();
 
-	/** Called by the finder whenever it reports a base. x and z are block coordinates. */
-	public static void add(String dimension, int x, int z) {
-		TARGETS.removeIf(t -> t.dimension().equals(dimension)
-				&& Math.abs(t.x() - x) <= MERGE_DISTANCE
-				&& Math.abs(t.z() - z) <= MERGE_DISTANCE);
-		TARGETS.add(new Target(dimension, x, z));
+	/** Called by the finder: remember the blocks of one chunk that belong to a reported base. */
+	public static void addChunk(String dimension, int chunkX, int chunkZ, int[] positions) {
+		if (positions.length == 0) {
+			return;
+		}
+		BLOCKS.computeIfAbsent(dimension, k -> new HashMap<>()).put(key(chunkX, chunkZ), positions);
 	}
 
 	@Override
@@ -84,42 +82,50 @@ public class BaseHighlighter implements ClientModInitializer {
 		LevelExtractionEvents.END_EXTRACTION.register(this::extract);
 		LevelRenderEvents.AFTER_TRANSLUCENT_TERRAIN.register(this::render);
 		ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
-			TARGETS.clear();
-			beams = List.of();
+			BLOCKS.clear();
+			boxes = List.of();
 		});
 	}
 
-	/** Extraction phase: work out which beams to draw this frame. */
+	/** Extraction phase: work out which blocks to draw this frame. */
 	private void extract(LevelExtractionContext context) {
 		Minecraft mc = Minecraft.getInstance();
-		if (mc.level == null || mc.player == null || TARGETS.isEmpty()) {
-			beams = List.of();
+		if (mc.level == null || mc.player == null || BLOCKS.isEmpty()) {
+			boxes = List.of();
 			return;
 		}
 
-		String dimension = dimensionName(mc.level.dimension().toString());
+		Map<Long, int[]> chunks = BLOCKS.get(dimensionName(mc.level.dimension().toString()));
+		if (chunks == null) {
+			boxes = List.of();
+			return;
+		}
+
 		double px = mc.player.getX();
 		double pz = mc.player.getZ();
+		double maxDistanceSquared = SHOW_DISTANCE * SHOW_DISTANCE;
 
-		List<Target> here = new ArrayList<>();
-		for (Target target : TARGETS) {
-			if (target.dimension().equals(dimension)) {
-				here.add(target);
+		List<BoxState> list = new ArrayList<>();
+		outer:
+		for (int[] positions : chunks.values()) {
+			for (int i = 0; i + 2 < positions.length; i += 3) {
+				double dx = positions[i] + 0.5 - px;
+				double dz = positions[i + 2] + 0.5 - pz;
+				if (dx * dx + dz * dz > maxDistanceSquared) {
+					continue;
+				}
+				list.add(new BoxState(positions[i], positions[i + 1], positions[i + 2]));
+				if (list.size() >= MAX_BOXES) {
+					break outer;
+				}
 			}
 		}
-		here.sort(Comparator.comparingDouble((Target t) -> Math.hypot(t.x() - px, t.z() - pz)));
-
-		List<BeamState> list = new ArrayList<>();
-		for (int i = 0; i < Math.min(MAX_BEAMS, here.size()); i++) {
-			Target target = here.get(i);
-			list.add(new BeamState(target.x() + 0.5f, target.z() + 0.5f));
-		}
-		beams = list;
+		boxes = list;
 	}
 
 	/** Drawing phase. */
 	private void render(LevelRenderContext context) {
-		List<BeamState> current = beams;
+		List<BoxState> current = boxes;
 		if (current.isEmpty()) {
 			return;
 		}
@@ -141,10 +147,10 @@ public class BaseHighlighter implements ClientModInitializer {
 		matrices.translate(-camera.x, -camera.y, -camera.z);
 
 		final VertexConsumer builder = stagedBuffer.getVertexBuilder(draw);
-		for (BeamState beam : current) {
+		for (BoxState box : current) {
 			renderFilledBox(matrices.last().pose(), builder,
-					beam.x() - HALF_WIDTH, MIN_Y, beam.z() - HALF_WIDTH,
-					beam.x() + HALF_WIDTH, MAX_Y, beam.z() + HALF_WIDTH,
+					box.x() - GROW, box.y() - GROW, box.z() - GROW,
+					box.x() + 1 + GROW, box.y() + 1 + GROW, box.z() + 1 + GROW,
 					1f, 0.5f, 0f, 0.5f);
 		}
 
@@ -159,7 +165,8 @@ public class BaseHighlighter implements ClientModInitializer {
 		}
 
 		stagedBuffer.endFrame();
-	}	private void renderFilledBox(Matrix4fc positionMatrix, VertexConsumer buffer, float minX, float minY, float minZ, float maxX, float maxY, float maxZ, float red, float green, float blue, float alpha) {
+	}
+		private void renderFilledBox(Matrix4fc positionMatrix, VertexConsumer buffer, float minX, float minY, float minZ, float maxX, float maxY, float maxZ, float red, float green, float blue, float alpha) {
 		// Front Face
 		buffer.addVertex(positionMatrix, minX, minY, maxZ).setColor(red, green, blue, alpha);
 		buffer.addVertex(positionMatrix, maxX, minY, maxZ).setColor(red, green, blue, alpha);
@@ -222,6 +229,10 @@ public class BaseHighlighter implements ClientModInitializer {
 			// The base vertex is the starting index when we copied the data into the vertex buffer divided by vertex size
 			renderPass.drawIndexed(info.indexCount(), 1, info.firstIndex(), info.baseVertex(), 0);
 		}
+	}
+
+	private static long key(int chunkX, int chunkZ) {
+		return ((long) chunkX << 32) ^ (chunkZ & 0xFFFFFFFFL);
 	}
 
 	/** "ResourceKey[minecraft:dimension / minecraft:overworld]" -> "overworld" */
