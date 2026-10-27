@@ -1,6 +1,7 @@
 package com.basefinder;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
@@ -11,15 +12,26 @@ import net.minecraft.world.level.chunk.LevelChunkSection;
 
 /** Walks the blocks of a chunk the server already sent us and adds up their weights. */
 final class ChunkScanner {
+	/** At most this many block positions are remembered per chunk (for the highlight). */
+	static final int MAX_POSITIONS = 100;
+
 	private ChunkScanner() {
 	}
 
-	static ChunkScore scan(LevelChunk chunk) {
+	/** minY is the lowest block height of the dimension (-64 in the overworld, 0 elsewhere). */
+	static ChunkScore scan(LevelChunk chunk, int minY) {
+		int minX = chunk.getPos().getMinBlockX();
+		int minZ = chunk.getPos().getMinBlockZ();
+
 		Map<Block, int[]> counts = new IdentityHashMap<>();
+		int[] positions = new int[MAX_POSITIONS * 3];
+		int found = 0;
 		int points = 0;
 		int strong = 0;
 
-		for (LevelChunkSection section : chunk.getSections()) {
+		LevelChunkSection[] sections = chunk.getSections();
+		for (int i = 0; i < sections.length; i++) {
+			LevelChunkSection section = sections[i];
 			if (section == null || section.hasOnlyAir()) {
 				continue;
 			}
@@ -28,6 +40,7 @@ final class ChunkScanner {
 				continue;
 			}
 
+			int baseY = minY + i * 16;
 			for (int y = 0; y < 16; y++) {
 				for (int z = 0; z < 16; z++) {
 					for (int x = 0; x < 16; x++) {
@@ -41,6 +54,13 @@ final class ChunkScanner {
 							strong++;
 						}
 						counts.computeIfAbsent(block, b -> new int[1])[0]++;
+
+						if (found < MAX_POSITIONS) {
+							positions[found * 3] = minX + x;
+							positions[found * 3 + 1] = baseY + y;
+							positions[found * 3 + 2] = minZ + z;
+							found++;
+						}
 					}
 				}
 			}
@@ -49,7 +69,7 @@ final class ChunkScanner {
 		if (points == 0) {
 			return ChunkScore.EMPTY;
 		}
-		return new ChunkScore(points, strong, summarise(counts));
+		return new ChunkScore(points, strong, summarise(counts), Arrays.copyOf(positions, found * 3));
 	}
 
 	/** "12 chest, 3 shulker_box, 40 oak_planks" - the three biggest contributors. */
