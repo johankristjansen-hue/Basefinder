@@ -113,21 +113,29 @@ public class BaseFinderClient implements ClientModInitializer {
 			process(mc, queue.poll());
 		}
 	}
-		private void process(Minecraft mc, PendingChunk pending) {
+			private void process(Minecraft mc, PendingChunk pending) {
 		LevelChunk chunk = pending.chunk();
+		String dimension = pending.dimension();
 		int cx = chunk.getPos().getMinBlockX() >> 4;
 		int cz = chunk.getPos().getMinBlockZ() >> 4;
-		DimensionState dim = dimensions.computeIfAbsent(pending.dimension(), k -> new DimensionState());
+		DimensionState dim = dimensions.computeIfAbsent(dimension, k -> new DimensionState());
 
 		if (dim.scores.containsKey(key(cx, cz))) {
 			return; // already scanned this chunk
 		}
 
-		ChunkScore score = ChunkScanner.scan(chunk);
+		// The overworld starts at height -64, the other dimensions at 0.
+		int minY = dimension.equals("overworld") ? -64 : 0;
+		ChunkScore score = ChunkScanner.scan(chunk, minY);
 		if (score.points() <= 0) {
 			return;
 		}
 		dim.scores.put(key(cx, cz), score);
+
+		// A chunk right next to a base we already reported: highlight its blocks straight away.
+		if (isNearReport(dim, cx, cz)) {
+			BaseHighlighter.addChunk(dimension, cx, cz, score.positions());
+		}
 
 		// Add up this chunk and its already-scanned neighbours, so a base that straddles
 		// several chunks still adds up to a high score.
@@ -167,16 +175,39 @@ public class BaseFinderClient implements ClientModInitializer {
 				if (total >= report.score * 2) {
 					report.score = total;
 					report.summary = bestSummary;
-					announce(mc, pending.dimension(), bestX, bestZ, total, bestSummary);
+					announce(mc, dimension, bestX, bestZ, total, bestSummary);
 				}
 				return;
 			}
 		}
 
 		dim.reports.add(new Report(bestX, bestZ, total, bestSummary));
-		announce(mc, pending.dimension(), bestX, bestZ, total, bestSummary);
+		highlightArea(dimension, dim, bestX, bestZ);
+		announce(mc, dimension, bestX, bestZ, total, bestSummary);
 	}
-			/** Bases farther away than this many blocks are not listed. */
+
+	/** Is this chunk close to a base that was already reported? */
+	private static boolean isNearReport(DimensionState dim, int cx, int cz) {
+		for (Report report : dim.reports) {
+			if (Math.abs(report.chunkX - cx) <= MERGE_RADIUS && Math.abs(report.chunkZ - cz) <= MERGE_RADIUS) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/** Hands the counted blocks of every scanned chunk around a new base to the highlighter. */
+	private static void highlightArea(String dimension, DimensionState dim, int centerX, int centerZ) {
+		for (int dx = -MERGE_RADIUS; dx <= MERGE_RADIUS; dx++) {
+			for (int dz = -MERGE_RADIUS; dz <= MERGE_RADIUS; dz++) {
+				ChunkScore s = dim.scores.get(key(centerX + dx, centerZ + dz));
+				if (s != null) {
+					BaseHighlighter.addChunk(dimension, centerX + dx, centerZ + dz, s.positions());
+				}
+			}
+		}
+	}
+		/** Bases farther away than this many blocks are not listed. */
 	private static final int MAX_DISTANCE = 3000;
 
 	/** Called when the key is pressed: lists the bases found near you in this dimension, nearest first. */
@@ -234,7 +265,6 @@ public class BaseFinderClient implements ClientModInitializer {
 
 		LOGGER.info("Possible base: {}", line);
 		appendToLog(line);
-		BaseHighlighter.add(dimension, x, z);
 		if (config.chat && mc.player != null) {
 			mc.player.sendSystemMessage(Component.literal(TAG + "Possible base: " + line));
 		}
