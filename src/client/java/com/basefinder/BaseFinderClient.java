@@ -176,7 +176,7 @@ public class BaseFinderClient implements ClientModInitializer {
 		dim.reports.add(new Report(bestX, bestZ, total, bestSummary));
 		announce(mc, pending.dimension(), bestX, bestZ, total, bestSummary);
 	}
-		/** Bases farther away than this many blocks are not listed. */
+			/** Bases farther away than this many blocks are not listed. */
 	private static final int MAX_DISTANCE = 3000;
 
 	/** Called when the key is pressed: lists the bases found near you in this dimension, nearest first. */
@@ -234,6 +234,7 @@ public class BaseFinderClient implements ClientModInitializer {
 
 		LOGGER.info("Possible base: {}", line);
 		appendToLog(line);
+		BaseHighlighter.add(dimension, x, z);
 		if (config.chat && mc.player != null) {
 			mc.player.sendSystemMessage(Component.literal(TAG + "Possible base: " + line));
 		}
