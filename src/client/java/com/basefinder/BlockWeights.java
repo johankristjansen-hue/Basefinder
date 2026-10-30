@@ -7,16 +7,16 @@ import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.world.level.block.Block;
 
 /**
- * How "base-like" each block is. Blocks are matched by their registry id (e.g. "chest",
+ * How "base-like" each block is. Blocks are matched by their registry id (e.g. "observer",
  * "red_concrete") so this keeps working even if Mojang renames Java classes between versions.
  *
- * Only blocks that players put down in numbers count. Generic building blocks (planks, torches,
- * rails, doors, glass, cobblestone, ...) are ignored on purpose, because mineshafts, villages and
- * other natural structures are full of them.
+ * Only blocks that natural world generation (villages, mineshafts, trial chambers, ...) does not
+ * create in bulk are counted. Everyday blocks like chests, ender chests, crafting tables, furnaces,
+ * beds, planks, torches and glass are ignored on purpose.
  *
- * Weight 0   = ignored
- * Weight 1-4 = storage and utility blocks
- * Weight 8+  = "strong" blocks that natural world generation almost never creates in bulk
+ * Weight 0  = ignored
+ * Weight 3+ = counted
+ * Weight 8+ = "strong" (the best signs of a base)
  */
 final class BlockWeights {
 	/** Weight at or above this counts as a "strong" signal. */
@@ -43,49 +43,29 @@ final class BlockWeights {
 	}
 
 	private static int compute(String id) {
-		// --- strong signals ---------------------------------------------------------------
-		if (id.contains("shulker_box")
-				|| id.equals("ender_chest")
-				|| id.equals("beacon")
-				|| id.equals("enchanting_table")
-				|| id.contains("anvil")
-				|| id.equals("hopper")
-				|| id.equals("observer")
+		// --- the strongest signs of a base ------------------------------------------------
+		if (id.contains("shulker_box") || id.equals("beacon") || id.equals("conduit")) {
+			return 10;
+		}
+		if (id.equals("observer")) {
+			return 8;
+		}
+
+		// --- redstone machines and similar ------------------------------------------------
+		if (id.equals("hopper")
 				|| id.equals("dropper")
 				|| id.equals("comparator")
 				|| id.equals("lodestone")
-				|| id.equals("respawn_anchor")
-				|| id.equals("conduit")
-				|| id.endsWith("_concrete")
-				|| id.endsWith("glazed_terracotta")
-				|| id.contains("stained_glass")
-				|| id.equals("tinted_glass")
-				|| id.equals("diamond_block")
-				|| id.equals("emerald_block")
-				|| id.equals("netherite_block")) {
-			return 10;
+				|| id.equals("respawn_anchor")) {
+			return 6;
 		}
 
-		// --- redstone / brewing gear ------------------------------------------------------
-		if (id.equals("dispenser") || id.equals("piston") || id.equals("sticky_piston")) {
-			return 5;
-		}
-		if (id.equals("brewing_stand") || id.equals("note_block") || id.equals("jukebox")) {
-			return 4;
-		}
-
-		// --- storage and utility blocks ---------------------------------------------------
-		if (id.equals("chest") || id.equals("trapped_chest")) {
-			return 4;
-		}
-		if (id.equals("barrel")) {
+		// --- weaker signs, only matter in large numbers -----------------------------------
+		if (id.equals("piston")
+				|| id.equals("sticky_piston")
+				|| id.contains("anvil")
+				|| id.endsWith("_concrete")) {
 			return 3;
-		}
-		if (id.equals("furnace") || id.equals("blast_furnace") || id.equals("smoker")) {
-			return 2;
-		}
-		if (id.equals("crafting_table") || id.endsWith("_bed")) {
-			return 1;
 		}
 
 		return 0;
